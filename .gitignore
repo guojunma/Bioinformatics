@@ -2,3 +2,8 @@
 .Rhistory
 .RData
 .Ruserdata
+Gene expression clustering/data/1000genomic.gds
+Gene expression clustering/data/1000genomicMerge.bed
+Gene expression clustering/data/1000genomicMerge.bim
+Gene expression clustering/data/1000genomicMerge.fam
+Gene expression clustering/data/1000genomicMerge.log
