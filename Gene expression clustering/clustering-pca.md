@@ -1,38 +1,16 @@
-Application of Unsupervised learning to biological data
+Explore 1000 genomics data using unsupervised learning methods
 ================
 
-## Introduction
+# Introduction
 
-In this project I explore clustering genes and samples using Affymetrix
-microarray data characterizing the gene expression profile of nebulin
-knockout mice. This data was made available by [Li F et
-al. (2015)](https://pubmed.ncbi.nlm.nih.gov/26123491/), with the GEO
-accession number
-[GSE70213](https://www.ncbi.nlm.nih.gov/sites/GDSbrowser?acc=GDS5881).
-Here’s a bit of background info on nebulin and the rationale of the
-study (quoted from the GEO entry):
-
-> Nebulin is a giant filamentous protein that is coextensive with the
-> actin filaments of the skeletal muscle sarcomere. Nebulin mutations
-> are the main cause of nemaline myopathy (NEM), with typical NEM adult
-> patients having low expression of nebulin, yet the roles of nebulin in
-> adult muscle remain poorly understood. To establish nebulin’s
-> functional roles in adult muscle we performed studies on a novel
-> conditional nebulin KO (Neb cKO) mouse model in which nebulin deletion
-> was driven by the muscle creatine kinase (MCK) promotor. Neb cKO mice
-> are born with high nebulin levels in their skeletal muscle but within
-> weeks after birth nebulin expression rapidly falls to barely
-> detectable levels Surprisingly, a large fraction of the mice survives
-> to adulthood with low nebulin levels (\<5% of control), contain
-> nemaline rods, and undergo fiber-type switching towards oxidative
-> types. These microarrays investigate the changes in gene expression
-> when nebulin is deficient.
-
-There are two genotypes in the study - the wildtype mice, and the
-nebulin knockout mice. We will compare the results of different
-clustering algorithms on the data, evaluate the effect of
-filtering/feature selection on the clusters, and lastly, try to assess
-if different attributes help explain the clusters we see.
+The 1000 Genomes Project is a landmark international collaboration that
+produced the most comprehensive public catalogue of human genetic
+variation to date. It contains the genome sequencing of 2,504
+individuals from 26 diverse populations around the world. All data are
+freely available on the official website, providing an essential
+baseline for studies of population genetics, disease‐association
+mapping, and functional genomics. In this project, we explore the
+genetic dataset using unsupervising learning methods.
 
 ## Load data and packages
 
@@ -43,688 +21,479 @@ already have these installed, you’ll first need to install them
 (recommended way is to use `BiocManager::install("packageName")`).
 
 ``` r
-library(RColorBrewer)
-library(cluster)
-library(pvclust)
-library(xtable)
-library(limma)
-library(tidyr)
-library(dplyr)
-library(GEOquery)
-library(knitr)
+if (!requireNamespace("BiocManager", quietly=TRUE))
+    install.packages("BiocManager")
+BiocManager::install("gdsfmt")
+BiocManager::install("SNPRelate")
 ```
 
-    ## Warning: package 'knitr' was built under R version 4.4.1
+``` r
+library(gdsfmt) # provides the genomic data structure (GDS) file format for array-oriented bioinformatic data, which is a container for storing annotation data and SNP genotypes
+library(SNPRelate) #Read SNP data and perform PCA
+```
+
+    ## SNPRelate -- supported by Streaming SIMD Extensions 2 (SSE2)
 
 ``` r
+library(ggplot2) 
+library(dplyr)
+```
+
+    ## 
+    ## Attaching package: 'dplyr'
+
+    ## The following objects are masked from 'package:stats':
+    ## 
+    ##     filter, lag
+
+    ## The following objects are masked from 'package:base':
+    ## 
+    ##     intersect, setdiff, setequal, union
+
+``` r
+library(kableExtra) 
+```
+
+    ## 
+    ## Attaching package: 'kableExtra'
+
+    ## The following object is masked from 'package:dplyr':
+    ## 
+    ##     group_rows
+
+``` r
+library(Rtsne) #t-SNE
 library(pheatmap)
-library(matrixStats)
-library(ggplot2)
-library(Rtsne)
+library(cluster)
 theme_set(theme_bw()) # prettier ggplot plots 
 ```
 
 ### Download and read the data into R
 
+I obtained the genetic data from 1000 genomic, followed the tutorial
+posted here (<https://www.biostars.org/p/335605/>). LD-pruning was
+performed using the PLINK software. SNPs with MAF \< 0.1 were removed.
+After filtering, the data contain 451,115 SNPs from 2,504 samples.
+
 ``` r
-# Get geo object that contains our data and phenotype information  
-geo_obj <- getGEO("GSE70213", getGPL = FALSE)
+# Convert the plink format to GDS format used for the package. 
+snpgdsBED2GDS(bed.fn = "data/1000genomicMerge.bed",
+              bim.fn = "data/1000genomicMerge.bim",
+              fam.fn = "data/1000genomicMerge.fam",
+              out.gdsfn = "data/1000genomic.gds")
 ```
 
-    ## Found 1 file(s)
-
-    ## GSE70213_series_matrix.txt.gz
-
 ``` r
-geo_obj <- geo_obj[[1]]
-
-geo_obj
+genofile <- snpgdsOpen("data/1000genomic.gds") #read the genotype file 
+genofile
 ```
 
-    ## ExpressionSet (storageMode: lockedEnvironment)
-    ## assayData: 35557 features, 24 samples 
-    ##   element names: exprs 
-    ## protocolData: none
-    ## phenoData
-    ##   sampleNames: GSM1720833 GSM1720834 ... GSM1720856 (24 total)
-    ##   varLabels: title geo_accession ... tissue:ch1 (39 total)
-    ##   varMetadata: labelDescription
-    ## featureData: none
-    ## experimentData: use 'experimentData(object)'
-    ##   pubMedIds: 26123491 
-    ## Annotation: GPL6246
+    ## File: C:\Users\gordo\Documents\GitHub\Bioinformatics\Gene expression clustering\data\1000genomic.gds (272.6M)
+    ## +    [  ] *
+    ## |--+ sample.id   { Str8 2504 LZMA_ra(7.66%), 1.5K }
+    ## |--+ snp.id   { Str8 451155 LZMA_ra(26.7%), 1.9M }
+    ## |--+ snp.position   { Int32 451155 LZMA_ra(54.2%), 954.4K }
+    ## |--+ snp.chromosome   { UInt8 451155 LZMA_ra(0.07%), 301B } *
+    ## |--+ snp.allele   { Str8 451155 LZMA_ra(20.7%), 446.9K }
+    ## |--+ genotype   { Bit2 2504x451155, 269.3M } *
+    ## \--+ sample.annot   [ data.frame ] *
+    ##    |--+ sex   { Str8 2504 LZMA_ra(3.91%), 105B }
+    ##    \--+ phenotype   { Int32 2504 LZMA_ra(1.26%), 133B }
 
 ``` r
-options('download.file.method' = 'curl')
+PED <- read.table('data/20130606_g1k.ped', header = TRUE, skip = 0, sep = '\t') #Read in the population information file 
+
+geno <- snpgdsGetGeno(genofile, snpfirstdim = FALSE, with.id = TRUE)
 ```
 
-We have read in the data as an `ExpressionSet` object, with 35557
-features (probes/genes), and 24 samples. The expression values are found
-in the `exprs` slot. Now, we’ll do some reformatting of the phenotypic
-(meta) data that is found in the `pData(geo_obj)` slot. Specifically,
-we’ll keep only relevant columns, rename them to something more
-convenient (since by default they are named “characteristics_ch#”, and
-the specific characteristic is encoded in the values), and change
-categorical variables to factors.
+    ## Genotype matrix: 2504 samples X 451155 SNPs
 
 ``` r
-# keep only relevant columns
-pData(geo_obj) <- pData(geo_obj) %>%
-  select(organism_ch1, title, contains("characteristics"))
-str(pData(geo_obj))
+tab <- data.frame(sample.id = geno$sample.id)
+tab <- left_join(tab, PED, by = c("sample.id" = "Individual.ID"))
+# Assigning the superpopulation group by browsering information from: http://www.internationalgenome.org/category/population/
+tab <- tab %>%
+  mutate(superpop = case_when(
+    Population %in% c("ESN", "MSL", "YRI", "LWK", "GWD") ~ "African",
+    Population %in% c("ASW", "ACB", "MXL", "PUR", "CLM", "PEL") ~ "Latin American",
+    Population %in% c("CEU", "TSI", "GBR", "FIN", "IBS") ~ "European",
+    Population %in% c("CHB", "JPT", "CHS", "CDX", "KHV", "CHD") ~ "East Asian", 
+    Population %in% c("GIH", "PJL", "BEB", "STU", "ITU") ~ "South Asian"))  %>%
+  mutate(superpop = as.factor(superpop))
+table(tab$superpop) 
 ```
 
-    ## 'data.frame':    24 obs. of  6 variables:
-    ##  $ organism_ch1         : chr  "Mus musculus" "Mus musculus" "Mus musculus" "Mus musculus" ...
-    ##  $ title                : chr  "quad-control-1" "quad-control-2" "quad-control-3" "quad-control-4" ...
-    ##  $ characteristics_ch1  : chr  "tissue: quadriceps" "tissue: quadriceps" "tissue: quadriceps" "tissue: quadriceps" ...
-    ##  $ characteristics_ch1.1: chr  "genotype: control" "genotype: control" "genotype: control" "genotype: control" ...
-    ##  $ characteristics_ch1.2: chr  "Sex: male" "Sex: male" "Sex: male" "Sex: male" ...
-    ##  $ characteristics_ch1.3: chr  "age: 41 days old" "age: 41 days old" "age: 41 days old" "age: 41 days old" ...
+    ## 
+    ##        African     East Asian       European Latin American    South Asian 
+    ##            504            504            503            504            489
 
 ``` r
-# Clean up covariate data
-pData(geo_obj) <- pData(geo_obj) %>%
-  rename(organism = organism_ch1,
-         sample_name = title) %>%
-  mutate(tissue = factor(gsub("tissue: ", "", characteristics_ch1)),
-         genotype = factor(gsub("genotype: ", "",characteristics_ch1.1)),
-         sex = factor(gsub("Sex: ", "",characteristics_ch1.2)),
-         age = gsub("age: ", "",characteristics_ch1.3)) %>%
-  select(-contains("characteristics"))
-rownames(pData(geo_obj)) <- colnames(exprs(geo_obj))
-
-head(pData(geo_obj))
+geno$superpop <- tab$superpop
+geno$population <- tab$Population
 ```
 
-    ##                organism    sample_name     tissue genotype  sex         age
-    ## GSM1720833 Mus musculus quad-control-1 quadriceps  control male 41 days old
-    ## GSM1720834 Mus musculus quad-control-2 quadriceps  control male 41 days old
-    ## GSM1720835 Mus musculus quad-control-3 quadriceps  control male 41 days old
-    ## GSM1720836 Mus musculus quad-control-4 quadriceps  control male 41 days old
-    ## GSM1720837 Mus musculus quad-control-5 quadriceps  control male 42 days old
-    ## GSM1720838 Mus musculus quad-control-6 quadriceps  control male 40 days old
+The table lists the number of each population, where the detailed
+description can be found on the
+[website]((http://www.internationalgenome.org/category/population/)).
 
-## Exploratory analysis
+# Dimension reduction
 
-Let us take a look at our expression values.
+## PCA
+
+The common way to explore high-dimensional data is by using principal
+component analysis(PCA). PCA is a dimensional reduction technique which
+preserves the dimensions with the largest variance in the data. It is a
+useful initial means of finding hidden structures in the data, and also
+to determine the important sources of variance.
 
 ``` r
-kable(head(exprs(geo_obj)[,1:5]))
+pca <- snpgdsPCA(genofile, num.thread=8) #Perform the principal component analysis
 ```
 
-|          |  GSM1720833 |  GSM1720834 |  GSM1720835 |  GSM1720836 |  GSM1720837 |
-|:---------|------------:|------------:|------------:|------------:|------------:|
-| 10338001 | 2041.408000 | 2200.861000 | 2323.760000 | 3216.263000 | 2362.775000 |
-| 10338002 |   63.780590 |   65.084380 |   58.308200 |   75.861450 |   66.956050 |
-| 10338003 |  635.390400 |  687.393600 |  756.004000 | 1181.929000 |  759.099800 |
-| 10338004 |  251.566800 |  316.997300 |  320.513200 |  592.806000 |  359.152500 |
-| 10338005 |    2.808835 |    2.966376 |    2.985357 |    3.352954 |    3.155735 |
-| 10338006 |    3.573085 |    3.816430 |    3.815323 |    4.690040 |    3.862684 |
+    ## Principal Component Analysis (PCA) on genotypes:
+    ## Excluding 0 SNP on non-autosomes
+    ## Excluding 0 SNP (monomorphic: TRUE, MAF: NaN, missing rate: NaN)
+    ##     # of samples: 2,504
+    ##     # of SNPs: 451,155
+    ##     using 8 threads
+    ##     # of principal components: 32
+    ## PCA:    the sum of all selected genotypes (0,1,2) = 478640888
+    ## CPU capabilities: Double-Precision SSE2
+    ## Tue May 13 16:30:05 2025    (internal increment: 808)
+    ## [..................................................]  0%, ETC: ---        [==================================================] 100%, completed, 1.1m
+    ## Tue May 13 16:31:08 2025    Begin (eigenvalues and eigenvectors)
+    ## Tue May 13 16:31:12 2025    Done.
 
 ``` r
-dim(exprs(geo_obj))
-```
-
-    ## [1] 35557    24
-
-If we look in the meta data slot (`pData`), we should have 1 row
-corresponding to each sample.
-
-``` r
-kable(head(pData(geo_obj)))
-```
-
-|            | organism     | sample_name    | tissue     | genotype | sex  | age         |
-|:-----------|:-------------|:---------------|:-----------|:---------|:-----|:------------|
-| GSM1720833 | Mus musculus | quad-control-1 | quadriceps | control  | male | 41 days old |
-| GSM1720834 | Mus musculus | quad-control-2 | quadriceps | control  | male | 41 days old |
-| GSM1720835 | Mus musculus | quad-control-3 | quadriceps | control  | male | 41 days old |
-| GSM1720836 | Mus musculus | quad-control-4 | quadriceps | control  | male | 41 days old |
-| GSM1720837 | Mus musculus | quad-control-5 | quadriceps | control  | male | 42 days old |
-| GSM1720838 | Mus musculus | quad-control-6 | quadriceps | control  | male | 40 days old |
-
-``` r
-dim(pData(geo_obj))
-```
-
-    ## [1] 24  6
-
-Now let us see how the gene values are spread across our dataset, with a
-frequency histogram (using base R).
-
-``` r
-hist(exprs(geo_obj), col="gray", main="GSE70213 - Histogram")
+plot(pca$varprop[1:10], xlab = "Principal componets", ylab = "percentage of variance explained")
 ```
 
 ![](clustering-pca_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
 
-It appears a lot of genes have values \< 1000. What happens if we plot
-the frequency distribution after Log2 transformation?
-
-> Why might it be useful to log transform the data, prior to making any
-> comparisons?
+The plot shows the percentage of variance explained by the top 10
+principal components. Here we see the first 4 components almost explain
+all the genetic variance.
 
 ``` r
-hist(log2(exprs(geo_obj)+1), col="gray", main="GSE70213 log transformed - Histogram")
+tab <- data.frame(sample.id = pca$sample.id,
+    EV1 = pca$eigenvect[,1],    # the first eigenvector
+    EV2 = pca$eigenvect[,2],    # the second eigenvector
+    EV3 = pca$eigenvect[,3], 
+    EV4 = pca$eigenvect[,4], 
+    stringsAsFactors = FALSE)
+tab <- left_join(tab,PED, by = c("sample.id" = "Individual.ID"))
+
+# Assigning the superpopulation group by browsering information from: http://www.internationalgenome.org/category/population/
+tab <- tab %>%
+  mutate(superpop = case_when(
+    Population %in% c("ESN", "MSL", "YRI", "LWK", "GWD") ~ "African",
+    Population %in% c("ASW", "ACB", "MXL", "PUR", "CLM", "PEL") ~ "Latin American",
+    Population %in% c("CEU", "TSI", "GBR", "FIN", "IBS") ~ "European",
+    Population %in% c("CHB", "JPT", "CHS", "CDX", "KHV", "CHD") ~ "East Asian", 
+    Population %in% c("GIH", "PJL", "BEB", "STU", "ITU") ~ "South Asian"))  %>%
+  mutate(superpop = as.factor(superpop))
 ```
 
-![](clustering-pca_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
-
-We’ll go ahead and work with the log2-transformed data for the remainder
-of the analyses. Note that we actually don’t have any zeroes, so there’s
-no need to add a pseudo count.
-
 ``` r
-min(exprs(geo_obj))
+# Draw
+plot(tab$EV1, tab$EV2, col=as.integer(tab$superpop), xlab="First component", ylab="Second component" )
+legend("topleft", legend=levels(tab$superpop), pch="o", col=1:nlevels(tab$superpop), cex = 0.7)
 ```
 
-    ## [1] 1.762702
+![](clustering-pca_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
 
 ``` r
-exprs(geo_obj) <- log2(exprs(geo_obj))
+plot(tab$EV1, tab$EV3, col=as.integer(tab$superpop), xlab="First component", ylab="Third component" )
+legend("topleft", legend=levels(tab$superpop), pch="o", col=1:nlevels(tab$superpop), cex = 0.7)
 ```
 
-Finally, we’ll center and scale the rows in our expression matrix, since
-we’re not interested in absolute differences in expression *between*
-genes at the moment. This additional step will make visualization easier
-later. Essentially, for each gene we will subtract its mean, and divide
-by its standard deviation (the same as z-scores). Note that the `scale`
-function we will use to do this by default *operates on columns* so we
-need to transpose with `t()` **before and after** using it in order to
-center and the scale rows.
-
-Since we still want to keep our original expression data, we’ll put this
-in a separate matrix. Note that although one can do this step within the
-`pheatmap()` function, it will not be available for other functions we
-will use.
+![](clustering-pca_files/figure-gfm/unnamed-chunk-10-2.png)<!-- -->
 
 ``` r
-# row means and variances before scaling
-rowMeans(head(exprs(geo_obj)))
+lbls <- paste("PC", 1:4, "\n", format(pca$varprop[1:4] * 100, digits=2), "%", sep="")
+pairs(pca$eigenvect[,1:4], col=tab$superpop, labels=lbls)
 ```
 
-    ##  10338001  10338002  10338003  10338004  10338005  10338006 
-    ## 11.027001  5.781680  9.303747  8.078106  1.546001  1.859040
+![](clustering-pca_files/figure-gfm/unnamed-chunk-10-3.png)<!-- -->
+
+We observe that the superpopulations are mostly clustered in groups when
+visualizing the first and the third principal components. We also
+observe that there is a wider spread of the first component among Latin
+Americans. Some are more similar to European, while some are closer to
+African. This can be attributed to greater genetic diversity among Latin
+Americans due to historical migration and population mixing.
 
 ``` r
-rowVars(head(exprs(geo_obj)))
+tab_Latin <- subset(tab, superpop == "Latin American") %>%
+  mutate(Population = as.factor(Population))
+
+plot(tab_Latin$EV1, tab_Latin$EV2, col=as.integer(tab_Latin$Population), xlab="First component", ylab="Second component")
+legend("bottomleft", legend=levels(tab_Latin$Population), pch="o", col=1:nlevels(tab_Latin$Population), cex = 0.7)
 ```
 
-    ##    10338001    10338002    10338003    10338004    10338005    10338006 
-    ## 0.045129680 0.048330346 0.087031589 0.147846847 0.005240254 0.009708631
+![](clustering-pca_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+
+Given that ASW are of African Ancestry in the Southwest US and ACB are
+of African Caribbean in Barbados, it is unsurprising to see the overlaps
+with African superpopulation from the PCA plot. We also found some
+overlaps between PUR(Puerto Rican), CLM(Colombina) and European
+superpopulation.
 
 ``` r
-expr_scaled <- t(scale(t(exprs(geo_obj))))
+tab_EUR <- subset(tab, superpop == "European") %>%
+  mutate(Population = as.factor(Population))
 
-# row means and variances after scaling
-rowMeans(head(expr_scaled))
+plot(tab_EUR$EV1, tab_EUR$EV2, col=as.integer(tab_EUR$Population), xlab="First component", ylab="Second component")
+legend("topleft", legend=levels(tab_EUR$Population), pch="o", col=1:nlevels(tab_EUR$Population), cex = 0.7)
 ```
 
-    ##      10338001      10338002      10338003      10338004      10338005 
-    ## -3.489107e-15 -1.098658e-17 -2.006641e-15  1.811340e-15 -9.014780e-16 
-    ##      10338006 
-    ##  2.856511e-16
+![](clustering-pca_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
+
+In the European population, the first component reflects geography
+across Europe, arranged from south to north. The Iberian populations in
+Spain (IBS) exhibit the smallest first component, followed by the
+Tuscans in Italy (TSI), the British in England and Scotland (GBR), the
+residents of Utah with Northern and Western European ancestry (CEU), and
+the Finnish people (FIN) in Finland. This replicates earlier results
+reported by (Novembre et al. 2008), which displayed a similar pattern.
+
+## t-SNE
+
+Another method that is an alternative to PCA is t-SNE. In contrast to
+PCA, it accounts for non-linear interactions between the features.
 
 ``` r
-rowVars(head(expr_scaled))
+tSNE <- Rtsne(geno$genotype,verbose = TRUE,partial_pca = TRUE) 
 ```
 
-    ## 10338001 10338002 10338003 10338004 10338005 10338006 
-    ##        1        1        1        1        1        1
-
-Now, let us try and consider how the various samples cluster across all
-our genes. We will then try and do some feature selection, and see the
-effect it has on the clustering of the samples. We will use the metadata
-to annotate our clusters and identify interesting clusters. The second
-part of our analysis will focus on clustering the genes across all our
-samples.
-
-## Sample Clustering
-
-In this section, we will use samples as objects to be clustered using
-gene attributes (i.e., each sample is a vector variable of dimension
-~35K).  
-First we will cluster the data using agglomerative hierarchical
-clustering. Here, the partitions can be visualized using a
-**dendrogram** at various levels of granularity. We do not need to input
-the number of clusters, in this approach. Then, we will find various
-clustering solutions using partitional clustering methods, specifically
-K-means and partition around medoids (PAM). Here, the partitions are
-independent of each other, and the number of clusters is given as an
-input. As an exercise, you will pick a specific number of clusters, and
-compare the sample memberships in these clusters across the various
-clustering methods.
-
-## Part I: Hierarchical Clustering
-
-### Hierarchical clustering for mice knockout data
-
-In this section we will illustrate different hierarchical clustering
-methods.
-
-However, for most expression data applications, we suggest you should:
-
-- standardize the data
-- use Euclidean as the “distance” (so it’s just like Pearson
-  correlation)
-- use “average linkage”
-
-First, we’ll compute the distance with `dist` - the default distance
-metric is euclidean. Note that we need to transpose the data with `t`
-since `dist` computes distances between rows (and our samples are in
-columns). The result is a distance object with all the pairwise
-euclidean distances between samples.
+    ## Performing PCA
+    ## Read the 2504 x 50 data matrix successfully!
+    ## OpenMP is working. 1 threads.
+    ## Using no_dims = 2, perplexity = 30.000000, and theta = 0.500000
+    ## Computing input similarities...
+    ## Building tree...
+    ## Done in 0.34 seconds (sparsity = 0.045037)!
+    ## Learning embedding...
+    ## Iteration 50: error is 74.108297 (50 iterations in 0.18 seconds)
+    ## Iteration 100: error is 59.936121 (50 iterations in 0.15 seconds)
+    ## Iteration 150: error is 57.645354 (50 iterations in 0.15 seconds)
+    ## Iteration 200: error is 56.622764 (50 iterations in 0.14 seconds)
+    ## Iteration 250: error is 55.959865 (50 iterations in 0.15 seconds)
+    ## Iteration 300: error is 1.344077 (50 iterations in 0.14 seconds)
+    ## Iteration 350: error is 1.043354 (50 iterations in 0.14 seconds)
+    ## Iteration 400: error is 0.897769 (50 iterations in 0.14 seconds)
+    ## Iteration 450: error is 0.820682 (50 iterations in 0.14 seconds)
+    ## Iteration 500: error is 0.780396 (50 iterations in 0.14 seconds)
+    ## Iteration 550: error is 0.757609 (50 iterations in 0.14 seconds)
+    ## Iteration 600: error is 0.743914 (50 iterations in 0.14 seconds)
+    ## Iteration 650: error is 0.733261 (50 iterations in 0.14 seconds)
+    ## Iteration 700: error is 0.724749 (50 iterations in 0.14 seconds)
+    ## Iteration 750: error is 0.718748 (50 iterations in 0.14 seconds)
+    ## Iteration 800: error is 0.713221 (50 iterations in 0.14 seconds)
+    ## Iteration 850: error is 0.706759 (50 iterations in 0.14 seconds)
+    ## Iteration 900: error is 0.702079 (50 iterations in 0.14 seconds)
+    ## Iteration 950: error is 0.696156 (50 iterations in 0.14 seconds)
+    ## Iteration 1000: error is 0.694277 (50 iterations in 0.14 seconds)
+    ## Fitting performed in 2.85 seconds.
 
 ``` r
-# compute pairwise distances
-pr.dis <- dist(t(expr_scaled), method = 'euclidean')
-str(pr.dis)
-```
-
-    ##  'dist' num [1:276] 205 214 322 225 257 ...
-    ##  - attr(*, "Size")= int 24
-    ##  - attr(*, "Labels")= chr [1:24] "GSM1720833" "GSM1720834" "GSM1720835" "GSM1720836" ...
-    ##  - attr(*, "Diag")= logi FALSE
-    ##  - attr(*, "Upper")= logi FALSE
-    ##  - attr(*, "method")= chr "euclidean"
-    ##  - attr(*, "call")= language dist(x = t(expr_scaled), method = "euclidean")
-
-Now, we’ll compute hierarchical clustering using `hclust` using 4
-different linkage types, and plot them. Check out `?hclust` to learn
-more about these settings. We set some plotting options to reduce the
-margins, and to arrange the plots 2 by 2.
-
-``` r
-pr.hc.s <- hclust(pr.dis, method = 'single')
-pr.hc.c <- hclust(pr.dis, method = 'complete')
-pr.hc.a <- hclust(pr.dis, method = 'average')
-pr.hc.w <- hclust(pr.dis, method = 'ward.D')
-
-# plot them
-op <- par(mar = c(0,4,4,2), mfrow = c(2,2))
-
-plot(pr.hc.s, labels = FALSE, main = "Single", xlab = "")
-plot(pr.hc.c, labels = FALSE, main = "Complete", xlab = "")
-plot(pr.hc.a, labels = FALSE, main = "Average", xlab = "")
-plot(pr.hc.w, labels = FALSE, main = "Ward", xlab = "")
-```
-
-![](clustering-pca_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
-
-``` r
-par(op)
-```
-
-We can look at the trees that are output from different clustering
-algorithms. However, it can also be visually helpful to identify what
-sorts of trends in the data are associated with these clusters. We can
-look at this output using heatmaps. We will be using the `pheatmap`
-package for this purpose.
-
-Recall that when you call `pheatmap()`, it automatically performs
-hierarchical clustering for you and it reorders the rows and/or columns
-of the data accordingly. Both the reordering and the dendrograms can be
-suppressed with `cluster_rows = FALSE` and/or `cluster_cols = FALSE`.
-
-*Note that when you have a lot of genes, the tree is pretty ugly. Thus,
-we’ll suppress row clustering for now since we are plotting all genes.*
-
-By default, `pheatmap()` uses the `hclust()` function, which takes a
-distance matrix, calculated by the `dist()` function (with
-`default = 'euclidean'`). However, you can also write your own
-clustering and distance functions. In the examples below, I used
-`hclust()` with `ward.D2` linkage method and the `euclidean` distance.
-
-*Note that the dendrogram in the top margin of the heatmap is the same
-as that of the `hclust()` function*
-
-``` r
-# set pheatmap clustering parameters
-clust_dist_col = "euclidean" 
-clust_method = "ward.D2"
-clust_scale = "none"
-
-## the annotation option uses the covariate object (pData(geo_obj)). It must have the same rownames, as the colnames in our data object (expr_scaled).  
-
-pheatmap(expr_scaled, 
-         cluster_rows = FALSE, 
-         scale = clust_scale, 
-         clustering_method = clust_method, 
-         clustering_distance_cols = clust_dist_col, 
-         show_colnames = TRUE, show_rownames = FALSE,  
-         main = "Clustering heatmap for GSE70213", 
-         annotation = pData(geo_obj)[,c("tissue","genotype")])
+as.data.frame(tSNE$Y) %>% 
+  mutate(population = geno$population) %>% 
+  mutate(superpop = geno$superpop) %>%
+  ggplot(aes(x = V1, y = V2, colour = superpop)) + 
+    geom_point() + 
+    xlab("tsne 1") +
+    ylab("tsne 2") +
+    ggtitle("tSNE")
 ```
 
 ![](clustering-pca_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
 
+It does not really separate the superpopulation into clusters. It is not
+actually perform better than PCA.
+
+# Clustering
+
+## Hierarchical Clustering
+
+Perform clustering based on the top 10 principal components of genetic
+matrix.
+
 ``` r
-# Your code here
-clust_dist_col = "correlation" 
-clust_method = "ward.D2"
-clust_scale = "none"
-
-## the annotation option uses the covariate object (pData(geo_obj)). It must have the same rownames, as the colnames in our data object (expr_scaled).  
-
-pheatmap(expr_scaled, 
-         cluster_rows = FALSE, 
-         scale = clust_scale, 
-         clustering_method = clust_method, 
-         clustering_distance_cols = clust_dist_col, 
-         show_colnames = TRUE, show_rownames = FALSE,  
-         main = "Clustering heatmap for GSE70213", 
-         annotation = pData(geo_obj)[,c("tissue","genotype")])
+distance <- dist(pca$eigenvect[, 1:10], method = 'euclidean') #Compute the Euclidean distance between each samples 
+str(distance)
 ```
 
-![](clustering-pca_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
+    ##  'dist' num [1:3133756] 0.01155 0.01751 0.01546 0.00543 0.00935 ...
+    ##  - attr(*, "Size")= int 2504
+    ##  - attr(*, "Diag")= logi FALSE
+    ##  - attr(*, "Upper")= logi FALSE
+    ##  - attr(*, "method")= chr "euclidean"
+    ##  - attr(*, "call")= language dist(x = pca$eigenvect[, 1:10], method = "euclidean")
 
-We can also change the colours of the different covariates.
-
-``` r
-## We can change the colours of the covariates  
-var1 = c("darkblue","darkred")
-names(var1) = levels(pData(geo_obj)$tissue)
-var2 = c("grey","black")
-names(var2) = levels(pData(geo_obj)$genotype)
-covar_color = list(tissue = var1, genotype = var2)
-
-my_heatmap_obj = pheatmap(expr_scaled, 
-                          cluster_rows = FALSE, 
-                          scale = clust_scale, 
-                          clustering_method = clust_method, 
-                          clustering_distance_cols = clust_dist_col, 
-                          show_rownames = FALSE, 
-                          main = "Clustering heatmap for GSE70213",
-                          annotation = pData(geo_obj)[,c("tissue","genotype")], 
-                          annotation_colors = covar_color)
-```
-
-![](clustering-pca_files/figure-gfm/unnamed-chunk-16-1.png)<!-- -->
-
-We can also get clusters from our pheatmap object. We will use the
-`cutree` function to extract the clusters. Note that we can do this for
-samples (look at the `tree_col`) or for genes (look at the `tree_row`).
-Note that we are literally cutting the tree by drawing a horizontal line
-either at a particular height (the `h` parameter in `cutree`), or at the
-height that gives us k clusters (the `k` parameter in `cutree`). Here
-we’ll obtain a clustering with 10 clusters.
+then, compute hierarchical clustering using 4 different linkage types:
+complete, single, average and Wald, and plot them.
 
 ``` r
-cluster_samples = cutree(my_heatmap_obj$tree_col, k = 10)
-kable(cluster_samples)
-```
+pr.hc.s <- hclust(distance, method = 'single')
+pr.hc.c <- hclust(distance, method = 'complete')
+pr.hc.a <- hclust(distance, method = 'average')
+pr.hc.w <- hclust(distance, method = 'ward.D')
 
-|            |   x |
-|:-----------|----:|
-| GSM1720833 |   1 |
-| GSM1720834 |   1 |
-| GSM1720835 |   1 |
-| GSM1720836 |   2 |
-| GSM1720837 |   1 |
-| GSM1720838 |   3 |
-| GSM1720839 |   4 |
-| GSM1720840 |   4 |
-| GSM1720841 |   5 |
-| GSM1720842 |   4 |
-| GSM1720843 |   4 |
-| GSM1720844 |   4 |
-| GSM1720845 |   6 |
-| GSM1720846 |   7 |
-| GSM1720847 |   7 |
-| GSM1720848 |   7 |
-| GSM1720849 |   7 |
-| GSM1720850 |   8 |
-| GSM1720851 |   9 |
-| GSM1720852 |   9 |
-| GSM1720853 |   9 |
-| GSM1720854 |   9 |
-| GSM1720855 |   9 |
-| GSM1720856 |  10 |
+# plot them
+op <- par(mar = c(0,4,4,2), mfrow = c(2,2))
 
-Note you can do this with the base `hclust` method too, as shown here.
-We are using one of the `hclust` objects we defined earlier in this
-document. Let’s plot the dendrogram and highlight the 10 clusters.
-
-``` r
-# identify 10 clusters
-op <- par(mar = c(1,4,4,1))
-plot(pr.hc.w, labels = pData(geo_obj)$grp, cex = 0.6, main = "Ward, 10 clusters", xlab = "" )
-rect.hclust(pr.hc.w, k = 10)
+plot(pr.hc.s, labels = FALSE, main = "Single")
+plot(pr.hc.c, labels = FALSE, main = "Complete")
+plot(pr.hc.a, labels = FALSE, main = "Average")
+plot(pr.hc.w, labels = FALSE, main = "Ward")
 ```
 
 ![](clustering-pca_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
 
 ``` r
-par(op) 
+par(op)
 ```
 
-We could save the heatmap we made to a PDF file for reference. Remember
-to define the filename properly as the file will be saved relative to
-where you are running the script in your directory structure.
+Find the 5 clusters based on the Ward linkage method.
 
 ``` r
-# Save the heatmap to a PDF file
-pdf ("GSE70213_Heatmap.pdf")
-my_heatmap_obj
-dev.off()
+cluster_samples = cutree(pr.hc.w, k = 5)
+table(cluster_samples, geno$superpop)
 ```
 
-## Part II: Parametric and Alternative Non-Parametric Clustering with PCA and t-SNE
+    ##                
+    ## cluster_samples African East Asian European Latin American South Asian
+    ##               1       0          0      493            266         103
+    ##               2       0         14       10             79         386
+    ##               3       0        490        0              0           0
+    ##               4     207          0        0            134           0
+    ##               5     297          0        0             25           0
 
-### Partitioning methods for mice knockout data
+Cluster 3 contains only the East Asian population, and cluster 5
+contains only the South Asian population. The other clusters contain the
+mixture. Let us look at the five clusters defined by the single linkage.
 
-As we saw in the previous section, we can build clusters bottom-up from
-our data, via agglomerative hierarchical clustering. This method
-produces a dendrogram. As a different algorithmic approach, we can
-pre-determine the number of clusters (k), iteratively pick different
-‘cluster representatives’, called centroids, and assign the closest
-remaining samples to it, until the solution converges to stable
-clusters. This way, we can find the best way to divide the data into the
-k clusters in this top-down clustering approach.
+``` r
+cluster_samples = cutree(pr.hc.s, k = 5)
+table(cluster_samples, geno$superpop)
+```
 
-The centroids can be determined in different ways, as covered in
-lecture. We will be covering two approaches, **k-means** (implemented in
-`kmeans` function), and **k-medoids** (implemented in the `pam`
-function).
+    ##                
+    ## cluster_samples African East Asian European Latin American South Asian
+    ##               1     207        490      493            397         103
+    ##               2     297         14       10            104         386
+    ##               3       0          0        0              1           0
+    ##               4       0          0        0              1           0
+    ##               5       0          0        0              1           0
 
-> Note that the results depend on the initial values (randomly
-> generated) to create the first k clusters. In order to get robust
-> results, you may need to set many initial points (see the parameter
-> `nstart`). You could also set a random seed to ensure the same results
-> each time (but this won’t guarantee robustness).
+The clustering based on the single linkage put most samples to the first
+cluster.
 
-#### K-means clustering
+``` r
+cluster_samples = cutree(pr.hc.a, k = 5) 
+table(cluster_samples, geno$superpop)
+```
+
+    ##                
+    ## cluster_samples African East Asian European Latin American South Asian
+    ##               1       0          0      491            137         102
+    ##               2       0        490        2            132           1
+    ##               3       0         14       10             79         386
+    ##               4     207          0        0            131           0
+    ##               5     297          0        0             25           0
+
+So is the average method. We can also visualize the genetic distribution
+with heatmap
+
+``` r
+# set pheatmap clustering parameters
+clust_dist_col = "euclidean" 
+clust_method = "ward.D"
+clust_scale = "none"
+
+## the annotation option uses the covariate object (pData(geo_obj)). It must have the same rownames, as the colnames in our data object (expr_scaled).  
+
+pheatmap(t(pca$eigenvect[,1:10]), 
+         cluster_rows = TRUE, 
+         cluster_cols = TRUE, 
+         scale = clust_scale, 
+         clustering_method = clust_method, 
+         clustering_distance_cols = clust_dist_col, 
+         show_colnames = FALSE, show_rownames = FALSE,  
+         main = "Clustering heatmap for top 10 principal components", 
+         annotation = t(geno$superpop))
+```
+
+![](clustering-pca_files/figure-gfm/unnamed-chunk-22-1.png)<!-- -->
+
+## K-mean clustering
 
 Keep in mind that k-means makes certain assumptions about the data that
 may not always hold:  
-- Variance of distribution of each variable (in our case, genes) is
-spherical  
+- Variance of distribution of each variable is spherical  
 - All variables have the same variance  
 - A prior probability that all k clusters have the same number of
 members
 
-Often, we have to try different ‘k’ values before we identify the most
-suitable k-means decomposition. We can look at the mutual information
-loss as clusters increase in count, to determine the number of clusters
-to use.
-
-Here we’ll just do a k-means clustering with k=5 of samples using all
-genes (~35K). Note again that we have to transpose our expression matrix
-so our samples are in rows since `kmeans` operates on rows.
+One can argue that for genetic data, the assumption that all SNPs have
+the same variance is the most easily violated.
 
 ``` r
-#Objects in columns
-set.seed(31)
+set.seed(17)
 k <- 5
-pr.km <- kmeans(t(expr_scaled), centers = k, nstart =  50)
+pr.km <- kmeans(pca$eigenvect[, 1:10], centers = k, nstart =  50)
 
-#We can look at the within sum of squares of each cluster
-pr.km$withinss
+#We can look at the size of each cluster
+pr.km$size
 ```
 
-    ## [1]      0.00 125694.08  94760.68 105507.14 110026.69
+    ## [1] 713 739 504  99 449
 
 ``` r
-#We can look at the composition of each cluster
-pr.kmTable <- data.frame(tissue = pData(geo_obj)$tissue, 
-                         genotype = pData(geo_obj)$genotype, 
-                         cluster = pr.km$cluster)
-kable(pr.kmTable)
+table(pr.km$cluster, geno$superpop)
 ```
 
-|            | tissue     | genotype   | cluster |
-|:-----------|:-----------|:-----------|--------:|
-| GSM1720833 | quadriceps | control    |       4 |
-| GSM1720834 | quadriceps | control    |       4 |
-| GSM1720835 | quadriceps | control    |       4 |
-| GSM1720836 | quadriceps | control    |       1 |
-| GSM1720837 | quadriceps | control    |       4 |
-| GSM1720838 | quadriceps | control    |       4 |
-| GSM1720839 | quadriceps | nebulin KO |       5 |
-| GSM1720840 | quadriceps | nebulin KO |       5 |
-| GSM1720841 | quadriceps | nebulin KO |       5 |
-| GSM1720842 | quadriceps | nebulin KO |       5 |
-| GSM1720843 | quadriceps | nebulin KO |       5 |
-| GSM1720844 | quadriceps | nebulin KO |       5 |
-| GSM1720845 | soleus     | control    |       2 |
-| GSM1720846 | soleus     | control    |       2 |
-| GSM1720847 | soleus     | control    |       2 |
-| GSM1720848 | soleus     | control    |       2 |
-| GSM1720849 | soleus     | control    |       2 |
-| GSM1720850 | soleus     | control    |       2 |
-| GSM1720851 | soleus     | nebulin KO |       3 |
-| GSM1720852 | soleus     | nebulin KO |       3 |
-| GSM1720853 | soleus     | nebulin KO |       3 |
-| GSM1720854 | soleus     | nebulin KO |       3 |
-| GSM1720855 | soleus     | nebulin KO |       3 |
-| GSM1720856 | soleus     | nebulin KO |       3 |
+    ##    
+    ##     African East Asian European Latin American South Asian
+    ##   1       0          0      503            210           0
+    ##   2     112          0        0            138         489
+    ##   3       0        504        0              0           0
+    ##   4      99          0        0              0           0
+    ##   5     293          0        0            156           0
 
-#### PAM algorithm
+K-means clustering successfully identifies the clusters of East Asian,
+European and South Asian populations.
+
+## PAM algorithm
 
 In K-medoids clustering, K representative objects (medoids) are chosen
 as cluster centers and objects are assigned to the center (medoid =
 cluster) with which they have minimum dissimilarity (Kaufman and
 Rousseeuw, 1990).  
 Nice features of partitioning around medoids (PAM) are: (a) it accepts a
-dissimilarity (distance) matrix (use `diss = TRUE`) (b) it is more
+dissimilarity (distance) matrix (use `diss = TRUE`), (b) it is more
 robust to outliers as the centroids of the clusters are data objects,
-unlike k-means
+unlike k-means.
 
 Here we run PAM with k = 5.
 
 ``` r
-pr.pam <- pam(pr.dis, k = 5)
-pr.pamTable <- data.frame(tissue = pData(geo_obj)$tissue, 
-                          genotype = pData(geo_obj)$genotype,
-                          cluster = pr.pam$clustering)
-kable(pr.pamTable)
+pr.pam <- pam(distance, k = 5)
+table(pr.pam$clustering, geno$superpop)
 ```
 
-|            | tissue     | genotype   | cluster |
-|:-----------|:-----------|:-----------|--------:|
-| GSM1720833 | quadriceps | control    |       1 |
-| GSM1720834 | quadriceps | control    |       1 |
-| GSM1720835 | quadriceps | control    |       1 |
-| GSM1720836 | quadriceps | control    |       2 |
-| GSM1720837 | quadriceps | control    |       1 |
-| GSM1720838 | quadriceps | control    |       3 |
-| GSM1720839 | quadriceps | nebulin KO |       3 |
-| GSM1720840 | quadriceps | nebulin KO |       3 |
-| GSM1720841 | quadriceps | nebulin KO |       3 |
-| GSM1720842 | quadriceps | nebulin KO |       3 |
-| GSM1720843 | quadriceps | nebulin KO |       3 |
-| GSM1720844 | quadriceps | nebulin KO |       3 |
-| GSM1720845 | soleus     | control    |       4 |
-| GSM1720846 | soleus     | control    |       5 |
-| GSM1720847 | soleus     | control    |       5 |
-| GSM1720848 | soleus     | control    |       5 |
-| GSM1720849 | soleus     | control    |       5 |
-| GSM1720850 | soleus     | control    |       5 |
-| GSM1720851 | soleus     | nebulin KO |       4 |
-| GSM1720852 | soleus     | nebulin KO |       4 |
-| GSM1720853 | soleus     | nebulin KO |       4 |
-| GSM1720854 | soleus     | nebulin KO |       4 |
-| GSM1720855 | soleus     | nebulin KO |       4 |
-| GSM1720856 | soleus     | nebulin KO |       4 |
+    ##    
+    ##     African East Asian European Latin American South Asian
+    ##   1       0          0      488            173          66
+    ##   2       0        490        5             92          37
+    ##   3       0         14       10             76         386
+    ##   4     207          0        0            135           0
+    ##   5     297          0        0             28           0
 
-> Additional information on the PAM result is available through
-> `summary(pr.pam)`
-
-``` r
-summary(pr.pam)
-```
-
-    ## Medoids:
-    ##      ID               
-    ## [1,] "2"  "GSM1720834"
-    ## [2,] "4"  "GSM1720836"
-    ## [3,] "7"  "GSM1720839"
-    ## [4,] "21" "GSM1720853"
-    ## [5,] "14" "GSM1720846"
-    ## Clustering vector:
-    ## GSM1720833 GSM1720834 GSM1720835 GSM1720836 GSM1720837 GSM1720838 GSM1720839 
-    ##          1          1          1          2          1          3          3 
-    ## GSM1720840 GSM1720841 GSM1720842 GSM1720843 GSM1720844 GSM1720845 GSM1720846 
-    ##          3          3          3          3          3          4          5 
-    ## GSM1720847 GSM1720848 GSM1720849 GSM1720850 GSM1720851 GSM1720852 GSM1720853 
-    ##          5          5          5          5          4          4          4 
-    ## GSM1720854 GSM1720855 GSM1720856 
-    ##          4          4          4 
-    ## Objective function:
-    ##    build     swap 
-    ## 160.3618 160.3618 
-    ## 
-    ## Numerical information per cluster:
-    ##      size max_diss  av_diss diameter separation
-    ## [1,]    4 207.1528 151.7822 225.4131   239.4018
-    ## [2,]    1   0.0000   0.0000   0.0000   309.7719
-    ## [3,]    7 246.9507 175.9213 282.3462   211.6935
-    ## [4,]    7 226.3409 167.8522 253.6156   211.6935
-    ## [5,]    5 222.8728 167.0281 222.8728   226.6721
-    ## 
-    ## Isolated clusters:
-    ##  L-clusters: character(0)
-    ##  L*-clusters: [1] 1 5
-    ## 
-    ## Silhouette plot information:
-    ##            cluster neighbor   sil_width
-    ## GSM1720834       1        3  0.25107164
-    ## GSM1720837       1        3  0.24808552
-    ## GSM1720835       1        3  0.17875520
-    ## GSM1720833       1        5  0.14821250
-    ## GSM1720836       2        1  0.00000000
-    ## GSM1720842       3        4  0.22716094
-    ## GSM1720843       3        4  0.21062659
-    ## GSM1720840       3        4  0.17404239
-    ## GSM1720839       3        4  0.15818558
-    ## GSM1720844       3        4  0.11237092
-    ## GSM1720841       3        4 -0.01105032
-    ## GSM1720838       3        1 -0.02439076
-    ## GSM1720851       4        5  0.20190820
-    ## GSM1720852       4        3  0.18775471
-    ## GSM1720855       4        3  0.18468227
-    ## GSM1720853       4        5  0.16163701
-    ## GSM1720854       4        5  0.14472032
-    ## GSM1720856       4        3  0.14360989
-    ## GSM1720845       4        5  0.02334617
-    ## GSM1720848       5        4  0.16357358
-    ## GSM1720849       5        4  0.15610914
-    ## GSM1720846       5        4  0.15454582
-    ## GSM1720847       5        4  0.12554254
-    ## GSM1720850       5        4  0.08297369
-    ## Average silhouette width per cluster:
-    ## [1] 0.2065312 0.0000000 0.1209922 0.1496655 0.1365490
-    ## Average silhouette width of total data set:
-    ## [1] 0.1418114
-    ## 
-    ## Available components:
-    ## [1] "medoids"    "id.med"     "clustering" "objective"  "isolation" 
-    ## [6] "clusinfo"   "silinfo"    "diss"       "call"
-
-We will now determine the optimal number of clusters in this experiment,
-by looking at the average silhouette value. This is a statistic
-introduced in the PAM algorithm, which lets us identify a suitable k.
+We will now determine the optimal number of clusters, by looking at the
+average silhouette value. This is a statistic introduced in the PAM
+algorithm, which lets us identify a suitable k.
 
 **The silhouette plot** The `cluster` package contains the function
 `silhouette()` that compares the minimum average dissimilarity
@@ -740,482 +509,91 @@ op <- par(mar = c(5,1,4,4))
 plot(pr.pam, main = "Silhouette Plot for 5 clusters")
 ```
 
-![](clustering-pca_files/figure-gfm/unnamed-chunk-23-1.png)<!-- -->
+![](clustering-pca_files/figure-gfm/unnamed-chunk-25-1.png)<!-- -->
 
 ``` r
 par(op)
 ```
 
-## Gene clustering
-
-A different view at the data can be obtained from clustering genes
-instead of samples. Since clustering genes is slow when you have a lot
-of genes, for the sake of time we will work with a smaller subset of
-genes.
-
-In many cases, analysts use cluster analysis to illustrate the results
-of a differential expression analysis. Sample clustering on
-differentially expressed genes will unsurprisingly show the separation
-of the groups specified in the DE analysis. Thus, as it was mentioned in
-lectures, we need to be careful in over-interpreting these kind of
-results (‘double-dipping’ the data). However, note that it is valid to
-perform a gene clustering to see if differential expressed genes cluster
-according to their function, subcellular localizations, pathways, etc.
-
-#### A smaller dataset
-
-#### Here well will fit an additive model and identify genes that show differential expression between nebulin KO and wildtype (control).
+We see that cluster 5 is the best defined cluster, followed by cluster
+4. We now draw a plot showing number of clusters in the x-axis and
+average silhouette widths in the y-axis, and determine the optimal
+choice for the number of clusters.
 
 ``` r
-cutoff <-  1e-05
-dsFit <- lmFit(exprs(geo_obj), 
-               model.matrix(~ tissue + genotype, pData(geo_obj)))
-dsEbFit <- eBayes(dsFit)
-dsHits <- topTable(dsEbFit,
-                   coef = c("genotypenebulin KO"),
-                   p.value = cutoff, n = Inf)
-nrow(dsHits)
+j <- 2:30
+avg_width <- numeric(length(j))  # pre-allocate numeric vector
+distance <- pca$eigenvect[, 1:10]
+
+for (i in j) {
+  pam_result <- pam(distance, k = i , diss = TRUE)  # ensure 'distance' is a dissimilarity matrix
+  avg_width[i - 1] <- pam_result$silinfo$avg.width
+}
 ```
 
-    ## [1] 1221
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
+    ## Warning in as.dist.default(x): non-square matrix
 
 ``` r
-topGenes <- rownames(dsHits)
-```
-
-We start by using different clustering algorithms to cluster the top
-1221 genes that showed differential expression across the different
-developmental stage (BH adjusted p value \< 10^{-5}).
-
-#### Agglomerative Hierarchical Clustering
-
-We can plot the heatmap using the `pheatmap` function. Notice how the
-rows are now clustered.
-
-``` r
-pheatmap(exprs(geo_obj)[topGenes, ],
-         scale = "row", 
-         clustering_method = "average", 
-         annotation = pData(geo_obj)[,c("tissue","genotype")], 
-         show_rownames = FALSE)
-```
-
-![](clustering-pca_files/figure-gfm/unnamed-chunk-25-1.png)<!-- -->
-
-Or we can plot the dendrogram of genes using the `plot` function, after
-we have made the hclust object.
-
-``` r
-geneC.dis <- dist(expr_scaled[topGenes,], method = 'euclidean')
-
-geneC.hc.a <- hclust(geneC.dis, method = 'average')
-
-plot(geneC.hc.a, labels = FALSE, main = "Hierarchical with Average Linkage", xlab = "")
+plot(j, avg_width, type = "b", pch = 19, col = "blue",
+     xlab = "Number of clusters (k)",
+     ylab = "Average silhouette width",
+     main = "Silhouette Width vs. Number of Clusters")
 ```
 
 ![](clustering-pca_files/figure-gfm/unnamed-chunk-26-1.png)<!-- -->
 
-As you can see, when there are lots of objects to cluster, the
-dendrograms are in general not very informative as it is difficult to
-identify any interesting pattern in the data.
+It seems like the optimal number is 10.
 
-#### Partitioning Methods
+# Discussion
 
-The most interesting thing to look at is the cluster centers (basically
-the “prototype” for the cluster) and membership sizes. Then we can try
-to visualize the genes that are in each cluster.
+In this project, I utilized various dimensionality reduction methods to
+visualize genetic data. Principal Component Analysis (PCA) allows for
+the separation of samples based on their continental ancestry groups. I
+also reproduced the finding that the first principal component
+distinguishes between northern and southern geographical locations
+within the European population. Additionally, I identified that Latin
+Americans exhibit significantly greater genetic variance compared to
+other populations. Furthermore, I applied several clustering algorithms
+to compare their performance on the genetic data..
 
-Let’s visualize a cluster (remember the data were rescaled) using line
-plots. This makes sense since we also want to be able to see the cluster
-center.
+<div id="refs" class="references csl-bib-body hanging-indent"
+entry-spacing="0">
 
-``` r
-set.seed(1234)
-k <- 5
-kmeans.genes <- kmeans(expr_scaled[topGenes,], centers = k)
+<div id="ref-novembre2008" class="csl-entry">
 
-# choose which cluster we want
-clusterNum <- 2
+Novembre, John, Toby Johnson, Katarzyna Bryc, Zoltán Kutalik, Adam R.
+Boyko, Adam Auton, Amit Indap, et al. 2008. “Genes Mirror Geography
+Within Europe.” *Nature* 456 (7218): 98–101.
+<https://doi.org/10.1038/nature07331>.
 
-df.centers <- data.frame(relexpr = kmeans.genes$centers[clusterNum, ],
-                         sample = colnames(geo_obj),
-                         genotype = pData(geo_obj)$genotype) 
-df.genes <- data.frame(expr_scaled[topGenes,][kmeans.genes$cluster == clusterNum, ]) %>% 
-  mutate(probe = topGenes[kmeans.genes$cluster == clusterNum]) %>%
-  pivot_longer(values_to = "relexpr", names_to = "sample", cols = -probe)
+</div>
 
-ggplot() +
-  geom_line(data = df.genes, 
-            aes(x = sample, y = relexpr, group = probe),
-            alpha = 0.2, linetype = "dashed", colour = "grey") +
-  geom_line(data = df.centers,
-            aes(x = sample, y = relexpr), group = 1) +
-  geom_point(data = df.centers,
-            aes(x = sample, y = relexpr, colour = genotype)) +
-  theme(axis.text.x = element_text(angle = 90)) +
-  ylab("Relative expression")
-```
-
-![](clustering-pca_files/figure-gfm/unnamed-chunk-27-1.png)<!-- -->
-
-## Evaluating clusters
-
-### Choosing the right k
-
-We need to find a balance between accurately grouping similar data into
-one representative cluster and the “cost” of adding additional clusters.
-Sometimes we don’t have any prior knowledge to tell us how many clusters
-there are supposed to be in our data. In this case, we can use Akaike
-Information Criterion
-([AIC](http://en.wikipedia.org/wiki/Akaike_information_criterion)) and
-Bayesian Information Criterion
-([BIC](http://en.wikipedia.org/wiki/Bayesian_information_criterion)) to
-help us to choose a proper k.
-
-First, we calculate the AIC for each choice of k. We are clustering the
-samples in this example:
-
-``` r
-set.seed(31)
-
-k_max  <-  10  # the max number of clusters to explore clustering with 
-km_fit  <-  list() # create empty list to store the kmeans object
-
-for (i in 1:k_max){
-  k_cluster  <-  kmeans(t(expr_scaled),centers=i, nstart =50)
-  km_fit[[i]]  <-  k_cluster
-}
-
-
-# function calculate AIC
-km_AIC  <-  function(km_cluster){
-  m  <-  ncol(km_cluster$centers)
-  n  <-  length(km_cluster$cluster)
-  k  <-  nrow(km_cluster$centers)
-  D  <-  km_cluster$tot.withinss
-  return(D + 2*m*k)
-}
-
-# calculate AIC with our new function
-aic <- sapply(km_fit, km_AIC)
-```
-
-Then, we plot the AIC vs. the number of clusters. We want to choose the
-k value that corresponds to the elbow point on the AIC/BIC curve.
-
-``` r
-plot(seq(1,k_max), aic, 
-     xlab = "Number of clusters",
-     ylab = "AIC",
-     pch = 20, cex = 2, main = "Clustering Samples" )
-```
-
-![](clustering-pca_files/figure-gfm/unnamed-chunk-29-1.png)<!-- -->
-
-Same for BIC
-
-``` r
-# calculate BIC
-km_BIC  <-  function(km_cluster){
-  m  <-  ncol(km_cluster$centers)
-  n  <-  length(km_cluster$cluster)
-  k  <-  nrow(km_cluster$centers)
-  D  <-  km_cluster$tot.withinss
-  return(D + log(n)*m*k)
-}
-
-bic <- sapply(km_fit,km_BIC)
-plot(seq(1,k_max), bic, 
-     xlab = "Number of clusters",
-     ylab = "BIC",
-     pch = 20, cex = 2, main="Clustering Samples" )
-```
-
-![](clustering-pca_files/figure-gfm/unnamed-chunk-30-1.png)<!-- -->
-
-## Dimension (feature) reduction
-
-There are various ways to reduce the number of features (variables)
-being used in our clustering analyses. One option is to subset the
-number of variables (genes) based on variance, calculated using the
-limma package (choosing genes with the highest shrunken gene-specific
-variance). This way, we remove genes that are uninteresting since they
-don’t vary much across samples.
-
-### PCA plots
-
-Another way we can reduce the number of features is using PCA (principal
-components analysis). PCA assumes that the *most important*
-characteristics of our data are the ones with the largest variance.
-Furthermore, it takes our data and organizes it in such a way that
-redundancy is removed as the most important variables are listed first.
-The new variables will be linear combinations of the original variables,
-with different weights.
-
-In R, we can use `prcomp()` to do PCA. You can also use `svd()`.
-
-> Make sure to set `scale` and `center` to FALSE if you input already
-> scaled data (by default `center` is set to TRUE).
-
-> CAUTION:`prcomp`’s centering and scaling is done on **columns** so you
-> need to transpose the data if you want to center and scale in
-> `prcomp`.
-
-``` r
-pcs <- prcomp(t(exprs(geo_obj)), center = TRUE, scale = TRUE)
-
-# scree plot
-plot(pcs) 
-```
-
-![](clustering-pca_files/figure-gfm/unnamed-chunk-31-1.png)<!-- -->
-
-``` r
-# append the rotations for the first 10 PCs to the phenodata
-prinComp <- cbind(pData(geo_obj), pcs$x[rownames(pData(geo_obj)), 1:10]) 
-
-# scatter plot showing us how the first few PCs relate to covariates
-plot(prinComp[ ,c("genotype", "tissue", "PC1", "PC2", "PC3")], pch = 19, cex = 0.8)
-```
-
-![](clustering-pca_files/figure-gfm/unnamed-chunk-31-2.png)<!-- -->
-
-Right away, you might be wondering *wait, should I run `prcomp` on my
-data with genes in rows, or genes in columns?* That’s a great question,
-since above we mentioned that, in particular, if you want to use the
-centering and scaling feature in `prcomp` *the genes must be in
-columns*. But, you could run it on already centered/scaled data where
-the genes are in rows. It turns out that running `svd` on the data
-matrix where samples are columns is exactly equivalent to `svd` on the
-data matrix where the samples are rows, *if no centering has been done*.
-It’s just that now, the meaning of the U and V matrices are swapped:
-
-``` r
-svd1 <- svd(t(exprs(geo_obj)))
-svd2 <- svd(exprs(geo_obj))
-
-all.equal(svd1$d, svd2$d)
-```
-
-    ## [1] TRUE
-
-``` r
-all.equal(svd1$u[,1], svd2$v[,1])
-```
-
-    ## [1] TRUE
-
-``` r
-all.equal(svd1$v[,1], svd2$u[,1])
-```
-
-    ## [1] TRUE
-
-In terms of `prcomp`, it is the `rotation` and `x` matrices that are
-swapped, although the equivalence with PCs is up to a scaling and
-rotation. So, though it is convention to perform PCA with features
-(genes) in columns for comparing samples, you can do it the other way
-around (*if you’re careful to make sure it is the genes that are being
-centered/scaled*) and achieve equivalent results up to a
-scaling/rotation of the values of the PCs. Also note that if instead
-you’re looking to find axes of variation of genes (instead of samples),
-as in SVA, then the scaling/centering should be done on samples instead.
-For more details, see lecture notes and [this section of Irizarry’s
-Genomics Class online
-book](https://genomicsclass.github.io/book/pages/pca_svd.html).
-
-OK, on with our analysis. What does the sample spread look like, as
-explained by their first 2 principal components?
-
-``` r
-plot(prinComp[ ,c("PC1","PC2")],  pch = 21, cex = 1.5)
-```
-
-<img src="clustering-pca_files/figure-gfm/unnamed-chunk-33-1.png" style="display: block; margin: auto;" />
-
-Is the covariate `tissue` localized in the different clusters we see?
-
-``` r
-plot(prinComp[ ,c("PC1","PC2")], bg = pData(geo_obj)$tissue, pch = 21, cex = 1.5)
-legend(list(x = 100, y = 150), as.character(levels(pData(geo_obj)$tissue)),
-       pch = 21, pt.bg = c(1,2,3,4,5))
-```
-
-<img src="clustering-pca_files/figure-gfm/unnamed-chunk-34-1.png" style="display: block; margin: auto;" />
-
-Is the covariate `genotype` localized in the different clusters we see?
-
-``` r
-plot(prinComp[ ,c("PC1","PC2")], bg = pData(geo_obj)$genotype, pch = 21, cex = 1.5)
-legend(list(x = 100, y = 150), as.character(levels(pData(geo_obj)$genotype)),
-       pch = 21, pt.bg = c(1,2,3,4,5))
-```
-
-<img src="clustering-pca_files/figure-gfm/unnamed-chunk-35-1.png" style="display: block; margin: auto;" />
-
-PCA is a useful initial means of analysing any hidden structures in your
-data. We can also use it to determine how many sources of variance are
-important, and how the different features interact to produce these
-sources.
-
-First, let us first assess how much of the total variance is captured by
-each principal component.
-
-``` r
-# Get the subset of PCs that capture the most variance in your predictors  
-summary(pcs)
-```
-
-    ## Importance of components:
-    ##                            PC1     PC2      PC3      PC4      PC5      PC6
-    ## Standard deviation     83.9529 75.4320 58.56178 50.43800 40.20507 36.22631
-    ## Proportion of Variance  0.1982  0.1600  0.09645  0.07155  0.04546  0.03691
-    ## Cumulative Proportion   0.1982  0.3582  0.45469  0.52624  0.57170  0.60861
-    ##                             PC7      PC8      PC9     PC10    PC11     PC12
-    ## Standard deviation     33.82370 32.92129 31.79331 30.42552 30.1714 29.89299
-    ## Proportion of Variance  0.03217  0.03048  0.02843  0.02603  0.0256  0.02513
-    ## Cumulative Proportion   0.64078  0.67127  0.69969  0.72573  0.7513  0.77646
-    ##                            PC13     PC14     PC15     PC16     PC17     PC18
-    ## Standard deviation     29.26634 28.58766 28.34109 27.75436 27.33229 26.69535
-    ## Proportion of Variance  0.02409  0.02298  0.02259  0.02166  0.02101  0.02004
-    ## Cumulative Proportion   0.80055  0.82353  0.84612  0.86779  0.88880  0.90884
-    ##                            PC19     PC20     PC21     PC22     PC23     PC24
-    ## Standard deviation     26.52966 25.79456 25.54092 24.84522 24.54739 3.29e-13
-    ## Proportion of Variance  0.01979  0.01871  0.01835  0.01736  0.01695 0.00e+00
-    ## Cumulative Proportion   0.92863  0.94735  0.96569  0.98305  1.00000 1.00e+00
-
-``` r
-plot(pcs$sdev^2 / sum(pcs$sdev^2), ylab = "Proportion Variance Explained", xlab = "PC")
-```
-
-![](clustering-pca_files/figure-gfm/unnamed-chunk-36-1.png)<!-- -->
-
-We see that the first two principal components capture 35% of the total
-variance. If we include the first 4 principal components, we capture
-more than 50% of the total variance.  
-Depending on which of these subsets you want to keep, we will select the
-data from the first n components (e.g. the first n columns of the `x`
-slot if genes are in columns). We can alternatively use the `tol`
-parameter in `prcomp` to remove trailing PCs (components are omitted if
-their standard deviations are less than or equal to tol times the
-standard deviation of the first component).
-
-``` r
-pcs_2dim <- prcomp(t(exprs(geo_obj)), center = TRUE, scale = TRUE, tol = 0.5)
-dim(pcs_2dim$x)
-```
-
-    ## [1] 24  4
-
-It is common to see a cluster analysis on the first few principal
-components to illustrate and explore the data.
-
-### t-SNE plots
-
-When we are dealing with datasets that have thousands of variables, and
-we want to have an initial pass at identifying hidden patterns in the
-data, another method we can use as an alternative to PCA is t-SNE. This
-method allows for non-linear interactions between our features.
-
-Importantly, there are certain caveats with using t-SNE.  
-1. Solutions are not deterministic: While in PCA the *correct* solution
-to a question is guaranteed, t-SNE can have many multiple minima, and
-might give many different optimal solutions. It is hence
-non-deterministic. This may make it challenging to generate reproducible
-results.  
-2. Clusters are not intuitive: t-SNE non-linearly collapses similar
-points in high dimensional space, on top of each other in lower
-dimensions. This means it maps features that are proximal to each other
-in a way that global trends may be **warped** (distance is not
-preserved). On the other hand, PCA always rotates our features in
-specific ways that can be extracted by considering the covariance matrix
-of our initial dataset and the eigenvectors in the new coordinate
-space.  
-3. Applying our fit to new data: t-SNE embedding is generated by moving
-all our data to a lower dimensional state. It does not give us
-eigenvectors (like PCA does) that can map/project new/unseen data to
-this lower dimensional state.
-
-The computational costs of t-SNE are also quite expensive, and finding
-an embedding in lower space that makes sense may often require extensive
-fientuning of several hyperparameters.
-
-We will be using the `Rtsne` package to visualize our data using
-t-SNE.  
-In this plot we are changing the `perplexity` parameter for the two
-different plots. As you see, the outputs are remarkably different.
-
-``` r
-# put genotype:tissue combination as a separate variable in metadata
-pData(geo_obj) <- pData(geo_obj) %>%
-  mutate(grp = interaction(tissue, genotype))
-colors = rainbow(length(unique(pData(geo_obj)$grp)))
-names(colors) = unique(pData(geo_obj)$grp)
-
-# function to plot first two tsne dimensions given expressionset and perplexity value
-tsnePlotPerplexity <- function(eset, perp){
-  Rtsne(t(exprs(eset)), 
-              pca_center = TRUE, pca_scale = TRUE,
-              dims = 2, perplexity = perp, verbose = TRUE, max_iter = 100)$Y %>%
-    data.frame() %>%
-    mutate(`Tissue.Genotype` = pData(eset)$grp) %>%
-    ggplot(aes(x = X1, y = X2, colour = `Tissue.Genotype`)) +
-      geom_point() +
-      xlab("tsne 1") +
-      ylab("tsne 2") +
-      ggtitle(paste0("tSNE, Perplexity ", perp))
-}
-
-tsnePlotPerplexity(eset = geo_obj, perp = 0.1)
-```
-
-    ## Performing PCA
-    ## Read the 24 x 24 data matrix successfully!
-    ## OpenMP is working. 1 threads.
-    ## Using no_dims = 2, perplexity = 0.100000, and theta = 0.500000
-    ## Computing input similarities...
-    ## Perplexity should be lower than K!
-    ## Building tree...
-    ## Done in 0.00 seconds (sparsity = 0.000000)!
-    ## Learning embedding...
-    ## Iteration 50: error is 0.000000 (50 iterations in 0.00 seconds)
-    ## Iteration 100: error is 0.000000 (50 iterations in 0.00 seconds)
-    ## Fitting performed in 0.00 seconds.
-
-<img src="clustering-pca_files/figure-gfm/unnamed-chunk-38-1.png" style="display: block; margin: auto;" />
-
-``` r
-tsnePlotPerplexity(eset = geo_obj, perp = 0.5)
-```
-
-    ## Performing PCA
-    ## Read the 24 x 24 data matrix successfully!
-    ## OpenMP is working. 1 threads.
-    ## Using no_dims = 2, perplexity = 0.500000, and theta = 0.500000
-    ## Computing input similarities...
-    ## Building tree...
-    ## Done in 0.00 seconds (sparsity = 0.069444)!
-    ## Learning embedding...
-    ## Iteration 50: error is 64.442923 (50 iterations in 0.00 seconds)
-    ## Iteration 100: error is 62.960022 (50 iterations in 0.00 seconds)
-    ## Fitting performed in 0.00 seconds.
-
-<img src="clustering-pca_files/figure-gfm/unnamed-chunk-38-2.png" style="display: block; margin: auto;" />
-
-``` r
-tsnePlotPerplexity(eset = geo_obj, perp = 2)
-```
-
-    ## Performing PCA
-    ## Read the 24 x 24 data matrix successfully!
-    ## OpenMP is working. 1 threads.
-    ## Using no_dims = 2, perplexity = 2.000000, and theta = 0.500000
-    ## Computing input similarities...
-    ## Building tree...
-    ## Done in 0.00 seconds (sparsity = 0.322917)!
-    ## Learning embedding...
-    ## Iteration 50: error is 59.086076 (50 iterations in 0.00 seconds)
-    ## Iteration 100: error is 60.806508 (50 iterations in 0.00 seconds)
-    ## Fitting performed in 0.00 seconds.
-
-<img src="clustering-pca_files/figure-gfm/unnamed-chunk-38-3.png" style="display: block; margin: auto;" />
+</div>
