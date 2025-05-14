@@ -341,10 +341,10 @@ par(op)
 We see that cluster 5 is the best defined cluster, followed by cluster 4.
 We now draw a plot showing number of clusters in the x-axis and average silhouette widths in the y-axis, and determine the optimal choice for the number of clusters.
 
-```{r, cache = TRUE}
+```{r silplot, cache = TRUE}
 j <- 2:30
 avg_width <- numeric(length(j))  # pre-allocate numeric vector
-distance <- pca$eigenvect[, 1:10]
+distance <- dist(pca$eigenvect[, 1:10])
 
 for (i in j) {
   pam_result <- pam(distance, k = i , diss = TRUE)  # ensure 'distance' is a dissimilarity matrix
@@ -365,4 +365,6 @@ In this project, I utilized various dimensionality reduction methods to visualiz
 Principal Component Analysis (PCA) allows for the separation of samples based on their continental ancestry groups.
 I also reproduced the finding that the first principal component distinguishes between northern and southern geographical locations within the European population.
 Additionally, I identified that Latin Americans exhibit significantly greater genetic variance compared to other populations.
-Furthermore, I applied several clustering algorithms to compare their performance on the genetic data..
+Furthermore, I applied several clustering algorithms to compare their performance on the genetic data.
+
+# References

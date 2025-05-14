@@ -88,7 +88,7 @@ genofile <- snpgdsOpen("data/1000genomic.gds") #read the genotype file
 genofile
 ```
 
-    ## File: C:\Users\gordo\Documents\GitHub\Bioinformatics\Gene expression clustering\data\1000genomic.gds (272.6M)
+    ## File: C:\Users\gordo\Documents\GitHub\Bioinformatics\Explore 1000 genomics data using unsupervised learning methods\data\1000genomic.gds (272.6M)
     ## +    [  ] *
     ## |--+ sample.id   { Str8 2504 LZMA_ra(7.66%), 1.5K }
     ## |--+ snp.id   { Str8 451155 LZMA_ra(26.7%), 1.9M }
@@ -523,52 +523,20 @@ choice for the number of clusters.
 ``` r
 j <- 2:30
 avg_width <- numeric(length(j))  # pre-allocate numeric vector
-distance <- pca$eigenvect[, 1:10]
+distance <- dist(pca$eigenvect[, 1:10])
 
 for (i in j) {
   pam_result <- pam(distance, k = i , diss = TRUE)  # ensure 'distance' is a dissimilarity matrix
   avg_width[i - 1] <- pam_result$silinfo$avg.width
 }
-```
 
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-    ## Warning in as.dist.default(x): non-square matrix
-
-``` r
 plot(j, avg_width, type = "b", pch = 19, col = "blue",
      xlab = "Number of clusters (k)",
      ylab = "Average silhouette width",
      main = "Silhouette Width vs. Number of Clusters")
 ```
 
-![](clustering-pca_files/figure-gfm/unnamed-chunk-26-1.png)<!-- -->
+![](clustering-pca_files/figure-gfm/silplot-1.png)<!-- -->
 
 It seems like the optimal number is 10.
 
@@ -582,7 +550,9 @@ distinguishes between northern and southern geographical locations
 within the European population. Additionally, I identified that Latin
 Americans exhibit significantly greater genetic variance compared to
 other populations. Furthermore, I applied several clustering algorithms
-to compare their performance on the genetic data..
+to compare their performance on the genetic data.
+
+# References
 
 <div id="refs" class="references csl-bib-body hanging-indent"
 entry-spacing="0">
