@@ -1,1 +1,1 @@
-# Biostatistics
+# Bioinformatics project
